@@ -68,7 +68,7 @@ async function executarEnvioBanners(env) {
       "📺 Tenha acesso a canais, filmes e séries por um preço que cabe no seu bolso!\n\n" +
       "💰 <b>Plano mensal:</b> R$30\n\n" +
       "🎯 <b>PROMOÇÃO ESPECIAL:</b>\n" +
-      "Assinando <b>3 meses ou mais</b>, you paga apenas\n" +
+      "Assinando <b>3 meses ou mais</b>, você paga apenas\n" +
       "👉 <b>R$25 por mês!</b>\n\n" +
       "🚀 <b>PROGRAMA DE INDICAÇÃO:</b>\n" +
       "Indicou um amigo e ele assinou?\n" +
@@ -93,7 +93,7 @@ async function executarEnvioBanners(env) {
   }
 }
 
-async function enviarMensagemTelegram(token: string, payload) {
+async function enviarMensagemTelegram(token, payload) {
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -101,7 +101,7 @@ async function enviarMensagemTelegram(token: string, payload) {
   });
 }
 
-async function enviarFotoTelegram(token: string, payload) {
+async function enviarFotoTelegram(token, payload) {
   await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
