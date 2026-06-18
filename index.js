@@ -1,12 +1,12 @@
 export default {
-  // Executa automaticamente de 1h em 1h via Cron da Cloudflare
+  // Executa automaticamente nos horários agendados (Cron)
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(executarEnvioBanners(env));
   },
 
-  // Resposta simples caso acesse o link pelo navegador
+  // Resposta simples para o navegador
   async fetch(request, env, ctx) {
-    return new Response("Bot de Banners automático ativo na raiz do Workers!");
+    return new Response("Bot de Banners ativo nos horários agendados!");
   }
 };
 
@@ -25,10 +25,8 @@ async function executarEnvioBanners(env) {
 
   const grupoUrl = "https://t.me/iptvsupermidia";
 
-  // Descobre a hora atual (Formato UTC padrão da Cloudflare)
+  // Alterna os banners usando a hora atual UTC
   const horaAtual = new Date().getUTCHours();
-  
-  // Alterna: Hora par envia Banner 1, Hora ímpar envia Banner 2
   const enviarBanner1 = (horaAtual % 2 === 0);
 
   if (enviarBanner1) {
@@ -53,11 +51,9 @@ async function executarEnvioBanners(env) {
         text: textoBanner1,
         parse_mode: "HTML",
         reply_markup: {
-          inline_keyboard: [[{ text: "📲 Entrar no grupo IPTV", url: grupoUrl }]]
+          inline_keyboard: [[{ text: "📲 Entrar no grupo IPTV", url: groupUrl }]]
         }
       });
-      
-      // Espera 2 segundos antes de enviar para o próximo grupo (Evita erro 429)
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
 
@@ -83,11 +79,9 @@ async function executarEnvioBanners(env) {
         caption: textoBanner2,
         parse_mode: "HTML",
         reply_markup: {
-          inline_keyboard: [[{ text: "📲 Quero aproveitar", url: grupoUrl }]]
+          inline_keyboard: [[{ text: "📲 Quero aproveitar", url: groupUrl }]]
         }
       });
-      
-      // Espera 2 segundos antes de enviar para o próximo grupo (Evita erro 429)
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
