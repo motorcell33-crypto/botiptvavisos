@@ -25,9 +25,17 @@ async function executarEnvioBanners(env) {
 
   const grupoUrl = "https://t.me/iptvsupermidia";
 
-  // Alterna os banners usando a hora atual UTC
+  // Lista dos horários em UTC exatamente na ordem do dia (00h, 08h, 11h, 12h, 15h, 18h, 20h, 22h de Brasília)
+  const horariosUTC = [3, 11, 14, 15, 18, 21, 23, 1];
+  
   const horaAtual = new Date().getUTCHours();
-  const enviarBanner1 = (horaAtual % 2 === 0);
+  
+  // Encontra qual é a posição da hora atual na nossa lista de agendamentos
+  const indiceHora = horariosUTC.indexOf(horaAtual);
+
+  // Se o índice for par (0, 2, 4, 6), envia o Banner 1. Se for ímpar (1, 3, 5, 7), envia o Banner 2.
+  // Se não achar por algum motivo, usa a hora como plano de fundo.
+  const enviarBanner1 = indiceHora !== -1 ? (indiceHora % 2 === 0) : (horaAtual % 2 === 0);
 
   if (enviarBanner1) {
     const textoBanner1 =
@@ -51,7 +59,7 @@ async function executarEnvioBanners(env) {
         text: textoBanner1,
         parse_mode: "HTML",
         reply_markup: {
-          inline_keyboard: [[{ text: "📲 Entrar no grupo IPTV", url: groupUrl }]]
+          inline_keyboard: [[{ text: "📲 Entrar no grupo IPTV", url: grupoUrl }]]
         }
       });
       await new Promise(resolve => setTimeout(resolve, 2000));
