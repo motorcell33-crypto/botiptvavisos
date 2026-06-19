@@ -1,6 +1,6 @@
 {
   "name": "botiptvavisos",
-  "main": "src/index.js",
+  "main": "index.js",
   "compatibility_date": "2026-06-19",
   "kv_namespaces": [
     {
