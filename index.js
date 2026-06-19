@@ -10,7 +10,7 @@ export default {
   }
 };
 
-async function executarEnvioBanners(env) {
+async function ejecutarEnvioBanners(env) {
   const grupos = [
     "-1002639652972", // Assistir Flamengo 2
     "-1001597337339", // Jogos do Flamengo 1
@@ -25,17 +25,11 @@ async function executarEnvioBanners(env) {
 
   const grupoUrl = "https://t.me/iptvsupermidia";
 
-  // Lista dos horários em UTC exatamente na ordem do dia (00h, 08h, 11h, 12h, 15h, 18h, 20h, 22h de Brasília)
-  const horariosUTC = [3, 11, 14, 15, 18, 21, 23, 1];
+  // Busca no KV qual foi o último banner enviado (se não existir, assume o "2" para começar pelo 1)
+  const ultimoBanner = await env.KV_BOT_BANNERS.get("ultimo_banner") || "2";
   
-  const horaAtual = new Date().getUTCHours();
-  
-  // Encontra qual é a posição da hora atual na nossa lista de agendamentos
-  const indiceHora = horariosUTC.indexOf(horaAtual);
-
-  // Se o índice for par (0, 2, 4, 6), envia o Banner 1. Se for ímpar (1, 3, 5, 7), envia o Banner 2.
-  // Se não achar por algum motivo, usa a hora como plano de fundo.
-  const enviarBanner1 = indiceHora !== -1 ? (indiceHora % 2 === 0) : (horaAtual % 2 === 0);
+  // Se o último enviado foi o 2, agora envia o 1. Se foi o 1, envia o 2.
+  const enviarBanner1 = (ultimoBanner === "2");
 
   if (enviarBanner1) {
     const textoBanner1 =
@@ -65,6 +59,9 @@ async function executarEnvioBanners(env) {
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
 
+    // Grava no KV que o último enviado foi o Banner 1
+    await env.KV_BOT_BANNERS.put("ultimo_banner", "1");
+
   } else {
     const foto = "https://i.ibb.co/WWMjLync/file-10.jpg";
     const textoBanner2 =
@@ -87,11 +84,14 @@ async function executarEnvioBanners(env) {
         caption: textoBanner2,
         parse_mode: "HTML",
         reply_markup: {
-          inline_keyboard: [[{ text: "📲 Quero aproveitar", url: groupUrl }]]
+          inline_keyboard: [[{ text: "📲 Quero aproveitar", url: grupoUrl }]]
         }
       });
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
+
+    // Grava no KV que o último enviado foi o Banner 2
+    await env.KV_BOT_BANNERS.put("ultimo_banner", "2");
   }
 }
 
