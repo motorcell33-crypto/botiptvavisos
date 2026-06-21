@@ -4,13 +4,14 @@ export default {
     ctx.waitUntil(executarEnvioBanners(env));
   },
 
-  // Resposta simples para o navegador
+  // Executa ao abrir o link no navegador (Para Testar na Hora)
   async fetch(request, env, ctx) {
-    return new Response("Bot de Banners ativo nos horários agendados!");
+    ctx.waitUntil(executarEnvioBanners(env));
+    return new Response("Disparando teste de envio nos grupos agora! Verifique seus grupos e a aba de Logs.");
   }
 };
 
-async function ejecutarEnvioBanners(env) {
+async function executarEnvioBanners(env) {
   const grupos = [
     "-1002639652972", // Assistir Flamengo 2
     "-1001597337339", // Jogos do Flamengo 1
@@ -53,7 +54,7 @@ async function ejecutarEnvioBanners(env) {
         text: textoBanner1,
         parse_mode: "HTML",
         reply_markup: {
-          inline_keyboard: [[{ text: "📲 Entrar no grupo IPTV", url: grupoUrl }]]
+          inline_keyboard: [[{ text: "📲 Entrar no grupo IPTV", url: groupUrl }]]
         }
       });
       await new Promise(resolve => setTimeout(resolve, 2000));
@@ -84,7 +85,7 @@ async function ejecutarEnvioBanners(env) {
         caption: textoBanner2,
         parse_mode: "HTML",
         reply_markup: {
-          inline_keyboard: [[{ text: "📲 Quero aproveitar", url: grupoUrl }]]
+          inline_keyboard: [[{ text: "📲 Quero aproveitar", url: groupUrl }]]
         }
       });
       await new Promise(resolve => setTimeout(resolve, 2000));
