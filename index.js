@@ -54,7 +54,7 @@ async function executarEnvioBanners(env) {
         text: textoBanner1,
         parse_mode: "HTML",
         reply_markup: {
-          inline_keyboard: [[{ text: "📲 Entrar no grupo IPTV", url: groupUrl }]]
+          inline_keyboard: [[{ text: "📲 Entrar no grupo IPTV", url: grupoUrl }]]
         }
       });
       await new Promise(resolve => setTimeout(resolve, 2000));
@@ -85,7 +85,7 @@ async function executarEnvioBanners(env) {
         caption: textoBanner2,
         parse_mode: "HTML",
         reply_markup: {
-          inline_keyboard: [[{ text: "📲 Quero aproveitar", url: groupUrl }]]
+          inline_keyboard: [[{ text: "📲 Quero aproveitar", url: grupoUrl }]]
         }
       });
       await new Promise(resolve => setTimeout(resolve, 2000));
