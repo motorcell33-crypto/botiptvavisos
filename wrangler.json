@@ -7,13 +7,10 @@
       "binding": "KV_BOT_BANNERS",
       "id": "8c1452513045440daf589a349748ef16"
     }
-  ]
-}
-
-{
+  ],
   "observability": {
     "logs": {
-      "enabled": false,
+      "enabled": true,
       "invocation_logs": true
     }
   }
