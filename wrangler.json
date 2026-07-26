@@ -2,6 +2,11 @@
   "name": "botiptvavisos",
   "main": "index.js",
   "compatibility_date": "2026-06-19",
+  "triggers": {
+    "crons": [
+      "0 23 * * *"
+    ]
+  },
   "kv_namespaces": [
     {
       "binding": "KV_BOT_BANNERS",
