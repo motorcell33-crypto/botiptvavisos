@@ -55,7 +55,7 @@ export default {
 
 // IDs numéricos do Telegram com permissão de uso do comando /send
 const ADMINS_AUTORIZADOS = [
-  "123456789", // Substitua pelo seu Telegram ID
+  "7717528550", // Substitua pelo seu Telegram ID
   "987654321"  // Substitua pelo Telegram ID do Sr. Flamengo (se houver)
 ];
 
