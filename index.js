@@ -6,12 +6,39 @@ export default {
 
   // Executa ao abrir o link no navegador (Para Testar na Hora)
   async fetch(request, env, ctx) {
+    const horaAtualBR = obterHoraBrasilia();
+
+    if (horaAtualBR !== 20) {
+      return new Response(
+        `⚠️ Envio cancelado: O disparo só ocorre às 20h (Horário de Brasília).\nHorário atual em Brasília: ${horaAtualBR}h.`,
+        { status: 200 }
+      );
+    }
+
     ctx.waitUntil(executarEnvioBanners(env));
-    return new Response("Disparando teste de envio nos grupos agora! Verifique seus grupos e a aba de Logs.");
+    return new Response("🚀 Disparando envio das 20h nos grupos agora! Verifique seus grupos e a aba de Logs.");
   }
 };
 
+// Auxiliar para obter a hora exata em Brasília (0 a 23)
+function obterHoraBrasilia() {
+  const horaStr = new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    hour: "numeric",
+    hour12: false
+  }).format(new Date());
+
+  return parseInt(horaStr, 10);
+}
+
 async function executarEnvioBanners(env) {
+  // Trava de segurança: Garante que mesmo acionado via Cron só dispara se for 20h em Brasília
+  const horaAtual = obterHoraBrasilia();
+  if (horaAtual !== 20) {
+    console.log(`[CANCELADO] Tentativa de disparo fora do horário. Hora em Brasília: ${horaAtual}h`);
+    return;
+  }
+
   const grupos = [
     "-1002639652972", // Assistir Flamengo 2
     "-1001597337339", // Jogos do Flamengo 1
@@ -27,8 +54,8 @@ async function executarEnvioBanners(env) {
   const grupoUrl = "https://t.me/iptvsupermidia";
 
   // Busca no KV qual foi o último banner enviado (se não existir, assume o "2" para começar pelo 1)
-  const ultimoBanner = await env.KV_BOT_BANNERS.get("ultimo_banner") || "2";
-  
+  const ultimoBanner = (await env.KV_BOT_BANNERS.get("ultimo_banner")) || "2";
+
   // Se o último enviado foi o 2, agora envia o 1. Se foi o 1, envia o 2.
   const enviarBanner1 = (ultimoBanner === "2");
 
