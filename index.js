@@ -1,62 +1,323 @@
 export default {
-  // Executa automaticamente nos horários agendados (Cron)
+  // Executa automaticamente nos horários agendados pelo Cron do Cloudflare (Banners automáticos)
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(executarEnvioBanners(env));
   },
 
-  // Executa ao abrir o link no navegador (Para Testar na Hora)
+  // Processa o Webhook do Telegram e requisições HTTP manuais
   async fetch(request, env, ctx) {
-    const horaAtualBR = obterHoraBrasilia();
+    const url = new URL(request.url);
 
-    if (horaAtualBR !== 20) {
-      return new Response(
-        `⚠️ Envio cancelado: O disparo só ocorre às 20h (Horário de Brasília).\nHorário atual em Brasília: ${horaAtualBR}h.`,
-        { status: 200 }
-      );
+    // 1. REQUISIÇÃO POST (Webhook vindo do Telegram)
+    if (request.method === "POST") {
+      try {
+        const update = await request.json();
+
+        // Processa mensagens enviadas para o Bot
+        if (update.message) {
+          ctx.waitUntil(processarMensagem(env, update.message));
+        }
+
+        // Processa cliques em botões inline (Callback)
+        if (update.callback_query) {
+          ctx.waitUntil(processarCallback(env, update.callback_query));
+        }
+
+        return new Response("OK", { status: 200 });
+      } catch (e) {
+        return new Response("Erro ao processar requisição do Webhook", { status: 400 });
+      }
     }
 
-    ctx.waitUntil(executarEnvioBanners(env));
-    return new Response("🚀 Disparando envio das 20h nos grupos agora! Verifique seus grupos e a aba de Logs.");
+    // 2. REQUISIÇÃO GET (Disparo manual via navegação/URL)
+    const tipo = url.searchParams.get("tipo");
+    const force = url.searchParams.get("force") === "true";
+    const horaAtualBR = obterHoraBrasilia();
+
+    if (tipo === "banner") {
+      if (horaAtualBR !== 20 && !force) {
+        return new Response(
+          `⚠️ Envio cancelado: O disparo padrão ocorre às 20h (Horário de Brasília).\nHorário atual: ${horaAtualBR}h.\n(Para forçar o envio agora, use: ?tipo=banner&force=true)`,
+          { status: 200 }
+        );
+      }
+      ctx.waitUntil(executarEnvioBanners(env, true)); // Força ignore da trava no cron
+      return new Response("🚀 Disparo dos Banners promocionais iniciado!", { status: 200 });
+    }
+
+    return new Response("🤖 Bot ativo com suporte a Webhook, fluxo /send e Banners automáticos!", { status: 200 });
   }
 };
 
-// Auxiliar para obter a hora exata em Brasília (0 a 23)
-function obterHoraBrasilia() {
-  const horaStr = new Intl.DateTimeFormat("pt-BR", {
-    timeZone: "America/Sao_Paulo",
-    hour: "numeric",
-    hour12: false
-  }).format(new Date());
+// -------------------------------------------------------------
+// CONFIGURAÇÕES GERAIS E GRUPOS
+// -------------------------------------------------------------
 
-  return parseInt(horaStr, 10);
+// IDs numéricos do Telegram com permissão de uso do comando /send
+const ADMINS_AUTORIZADOS = [
+  "123456789", // Substitua pelo seu Telegram ID
+  "987654321"  // Substitua pelo Telegram ID do Sr. Flamengo (se houver)
+];
+
+// Lista de grupos onde os disparos serão efetuados
+const LISTA_GRUPOS = [
+  "-1002639652972", // Assistir Flamengo 2
+  "-1001597337339", // Jogos do Flamengo 1
+  "-1001825003132", // Super Midia HP 3
+  "-1001860646849", // Super Mídia HP 4
+  "-1001615563422", // Super Mídia HP 5
+  "-1001946792700", // Super Mídia HP 6
+  "-1001986844811", // Super Mídia HP 7
+  "-1001960532297", // Super Mídia HP 8
+  "-1001870101218"  // Canais de TV, Filmes e Séries
+];
+
+const LINK_PADRAO = "https://t.me/iptvsupermidia";
+
+// -------------------------------------------------------------
+// FLUXO INTERATIVO DO COMANDO /send
+// -------------------------------------------------------------
+
+async function processarMensagem(env, message) {
+  const userId = message.from.id.toString();
+  const chatId = message.chat.id;
+
+  // Trava de segurança para administradores
+  if (ADMINS_AUTORIZADOS.length > 0 && !ADMINS_AUTORIZADOS.includes(userId)) return;
+
+  const texto = message.caption || message.text || "";
+
+  // Comando /cancelar -> Reseta o estado a qualquer momento
+  if (texto === "/cancelar") {
+    await env.KV_BOT_BANNERS.delete(`state_${userId}`);
+    await enviarTelegram(env.TELEGRAM_TOKEN, "sendMessage", {
+      chat_id: chatId,
+      text: "❌ <b>Operação cancelada!</b> O bot foi resetado.",
+      parse_mode: "HTML"
+    });
+    return;
+  }
+
+  // Obtém o estado atual da conversa no KV
+  const rawState = await env.KV_BOT_BANNERS.get(`state_${userId}`);
+  const state = rawState ? JSON.parse(rawState) : null;
+
+  // 1. INÍCIO DO FLUXO: /send
+  if (texto === "/send" || texto === "/start") {
+    await env.KV_BOT_BANNERS.put(`state_${userId}`, JSON.stringify({ step: "WAITING_MEDIA" }));
+
+    await enviarTelegram(env.TELEGRAM_TOKEN, "sendMessage", {
+      chat_id: chatId,
+      text: "📸 <b>Passo 1/3: Envie o conteúdo do disparo</b>\n\n" +
+            "Você pode enviar:\n" +
+            "• Uma <b>Foto</b> (com ou sem legenda)\n" +
+            "• Um <b>Vídeo</b> (com ou sem legenda)\n" +
+            "• Um <b>GIF / Animação</b> (com ou sem legenda)\n" +
+            "• Apenas <b>Texto</b>\n\n" +
+            "<i>Para cancelar a qualquer momento, digite /cancelar</i>",
+      parse_mode: "HTML"
+    });
+    return;
+  }
+
+  // 2. RECEBENDO MÍDIA OU TEXTO
+  if (state && state.step === "WAITING_MEDIA") {
+    let mediaType = "text";
+    let fileId = null;
+
+    if (message.photo) {
+      mediaType = "photo";
+      fileId = message.photo[message.photo.length - 1].file_id; // Foto na maior resolução
+    } else if (message.video) {
+      mediaType = "video";
+      fileId = message.video.file_id;
+    } else if (message.animation) {
+      mediaType = "animation";
+      fileId = message.animation.file_id;
+    }
+
+    const payloadState = {
+      step: "WAITING_BUTTONS_CHOICE",
+      mediaType: mediaType,
+      fileId: fileId,
+      caption: texto
+    };
+
+    await env.KV_BOT_BANNERS.put(`state_${userId}`, JSON.stringify(payloadState));
+
+    await enviarTelegram(env.TELEGRAM_TOKEN, "sendMessage", {
+      chat_id: chatId,
+      text: "✅ <b>Mídia/Texto recebidos com sucesso!</b>\n\n" +
+            "Deseja adicionar <b>botões interativos</b> a essa publicação?",
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "➕ Adicionar Botões", callback_data: "btn_yes" }],
+          [{ text: "➡️ Enviar sem Botões", callback_data: "btn_no" }]
+        ]
+      }
+    });
+    return;
+  }
+
+  // 3. RECEBENDO A ESTRUTURA DOS BOTÕES EM TEXTO
+  if (state && state.step === "WAITING_BUTTONS_INPUT") {
+    const inlineKeyboard = montarTecladoBotoes(texto);
+
+    if (inlineKeyboard.length === 0) {
+      await enviarTelegram(env.TELEGRAM_TOKEN, "sendMessage", {
+        chat_id: chatId,
+        text: "⚠️ <b>Formato inválido!</b> Envie no formato:\n<code>Texto do Botão - https://link.com</code>",
+        parse_mode: "HTML"
+      });
+      return;
+    }
+
+    state.step = "WAITING_CONFIRMATION";
+    state.buttons = inlineKeyboard;
+    await env.KV_BOT_BANNERS.put(`state_${userId}`, JSON.stringify(state));
+
+    // Exibe Prévia da Mensagem com os Botões
+    await enviarTelegram(env.TELEGRAM_TOKEN, "sendMessage", {
+      chat_id: chatId,
+      text: "👀 <b>Prévia de como os botões vão ficar:</b>",
+      parse_mode: "HTML"
+    });
+
+    await enviarConteudo(env.TELEGRAM_TOKEN, chatId, state, { inline_keyboard: inlineKeyboard });
+
+    await enviarTelegram(env.TELEGRAM_TOKEN, "sendMessage", {
+      chat_id: chatId,
+      text: "⚙️ <b>Confirma o disparo para todos os grupos?</b>",
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🚀 Confirmar e Disparar", callback_data: "confirm_send" }],
+          [{ text: "❌ Cancelar", callback_data: "cancel_send" }]
+        ]
+      }
+    });
+  }
 }
 
-async function executarEnvioBanners(env) {
-  // Trava de segurança: Garante que mesmo acionado via Cron só dispara se for 20h em Brasília
+// -------------------------------------------------------------
+// PROCESSAMENTO DAS RESPOSTAS DOS BOTÕES INLINE (CALLBACK)
+// -------------------------------------------------------------
+
+async function processarCallback(env, callback) {
+  const userId = callback.from.id.toString();
+  const chatId = callback.message.chat.id;
+  const data = callback.data;
+
+  await enviarTelegram(env.TELEGRAM_TOKEN, "answerCallbackQuery", { callback_query_id: callback.id });
+
+  const rawState = await env.KV_BOT_BANNERS.get(`state_${userId}`);
+  if (!rawState) return;
+
+  const state = JSON.parse(rawState);
+
+  // Opção: NÃO adicionar botões
+  if (data === "btn_no") {
+    state.step = "WAITING_CONFIRMATION";
+    state.buttons = null;
+    await env.KV_BOT_BANNERS.put(`state_${userId}`, JSON.stringify(state));
+
+    await enviarTelegram(env.TELEGRAM_TOKEN, "sendMessage", {
+      chat_id: chatId,
+      text: "👀 <b>Prévia da mensagem sem botões:</b>",
+      parse_mode: "HTML"
+    });
+
+    await enviarConteudo(env.TELEGRAM_TOKEN, chatId, state, null);
+
+    await enviarTelegram(env.TELEGRAM_TOKEN, "sendMessage", {
+      chat_id: chatId,
+      text: "⚙️ <b>Confirma o disparo para todos os grupos?</b>",
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🚀 Confirmar e Disparar", callback_data: "confirm_send" }],
+          [{ text: "❌ Cancelar", callback_data: "cancel_send" }]
+        ]
+      }
+    });
+    return;
+  }
+
+  // Opção: SIM, adicionar botões
+  if (data === "btn_yes") {
+    state.step = "WAITING_BUTTONS_INPUT";
+    await env.KV_BOT_BANNERS.put(`state_${userId}`, JSON.stringify(state));
+
+    await enviarTelegram(env.TELEGRAM_TOKEN, "sendMessage", {
+      chat_id: chatId,
+      text: "🔘 <b>Passo 2/3: Envie a estrutura dos botões</b>\n\n" +
+            "<b>1️⃣ Botões Empilhados (Um abaixo do outro):</b>\n" +
+            "Envie cada botão em uma linha separada:\n" +
+            "<code>Comprar Acesso - https://link1.com\nGrupo VIP - https://link2.com</code>\n\n" +
+            "<b>2️⃣ Botões Lado a Lado (Na mesma linha):</b>\n" +
+            "Separe os botões da mesma linha usando <code>|</code>:\n" +
+            "<code>Entrar no Grupo - https://link1.com | Suporte - https://link2.com</code>\n\n" +
+            "<b>3️⃣ Grade Mista (Exemplo):</b>\n" +
+            "<code>Assistir - https://link1.com | Comprar - https://link2.com\nAjuda - https://link3.com</code>",
+      parse_mode: "HTML"
+    });
+    return;
+  }
+
+  // Opção: Cancelar disparo
+  if (data === "cancel_send") {
+    await env.KV_BOT_BANNERS.delete(`state_${userId}`);
+    await enviarTelegram(env.TELEGRAM_TOKEN, "sendMessage", {
+      chat_id: chatId,
+      text: "❌ <b>Envio cancelado com sucesso.</b>",
+      parse_mode: "HTML"
+    });
+    return;
+  }
+
+  // Opção: Confirmar e Disparar para todos os grupos
+  if (data === "confirm_send") {
+    await env.KV_BOT_BANNERS.delete(`state_${userId}`);
+
+    await enviarTelegram(env.TELEGRAM_TOKEN, "sendMessage", {
+      chat_id: chatId,
+      text: "🚀 <b>Iniciando disparo em todos os grupos... Por favor, aguarde.</b>",
+      parse_mode: "HTML"
+    });
+
+    let sucessos = 0;
+    const replyMarkup = state.buttons ? { inline_keyboard: state.buttons } : null;
+
+    for (const grupoId of LISTA_GRUPOS) {
+      await enviarConteudo(env.TELEGRAM_TOKEN, grupoId, state, replyMarkup);
+      sucessos++;
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Intervalo anti-spam
+    }
+
+    await enviarTelegram(env.TELEGRAM_TOKEN, "sendMessage", {
+      chat_id: chatId,
+      text: `✅ <b>Disparo concluído com sucesso!</b>\nEnviado para ${sucessos} grupos.`,
+      parse_mode: "HTML"
+    });
+  }
+}
+
+// -------------------------------------------------------------
+// ENVIOS AUTOMÁTICOS DE BANNERS (FUNÇÃO ANTIGA MANTIDA)
+// -------------------------------------------------------------
+
+async function executarEnvioBanners(env, forcar = false) {
   const horaAtual = obterHoraBrasilia();
-  if (horaAtual !== 20) {
+  
+  // Validação de horário para execuções via Cron
+  if (horaAtual !== 20 && !forcar) {
     console.log(`[CANCELADO] Tentativa de disparo fora do horário. Hora em Brasília: ${horaAtual}h`);
     return;
   }
 
-  const grupos = [
-    "-1002639652972", // Assistir Flamengo 2
-    "-1001597337339", // Jogos do Flamengo 1
-    "-1001825003132", // Super Midia HP 3
-    "-1001860646849", // Super Mídia HP 4
-    "-1001615563422", // Super Mídia HP 5
-    "-1001946792700", // Super Mídia HP 6
-    "-1001986844811", // Super Mídia HP 7
-    "-1001960532297", // Super Mídia HP 8
-    "-1001870101218"  // Canais de TV, Filmes e Séries
-  ];
-
-  const grupoUrl = "https://t.me/iptvsupermidia";
-
-  // Busca no KV qual foi o último banner enviado (se não existir, assume o "2" para começar pelo 1)
+  // Busca qual foi o último banner enviado no KV
   const ultimoBanner = (await env.KV_BOT_BANNERS.get("ultimo_banner")) || "2";
-
-  // Se o último enviado foi o 2, agora envia o 1. Se foi o 1, envia o 2.
   const enviarBanner1 = (ultimoBanner === "2");
 
   if (enviarBanner1) {
@@ -75,23 +336,22 @@ async function executarEnvioBanners(env) {
       "👉 <b>NÃO FIQUE DE FORA!</b>\n" +
       "📲 Quem tiver interesse, entre em nosso grupo pelo botão abaixo. 👇";
 
-    for (const chatId of grupos) {
-      await enviarMensagemTelegram(env.TELEGRAM_TOKEN, {
+    for (const chatId of LISTA_GRUPOS) {
+      await enviarTelegram(env.TELEGRAM_TOKEN, "sendMessage", {
         chat_id: chatId,
         text: textoBanner1,
         parse_mode: "HTML",
         reply_markup: {
-          inline_keyboard: [[{ text: "📲 Entrar no grupo IPTV", url: grupoUrl }]]
+          inline_keyboard: [[{ text: "📲 Entrar no grupo IPTV", url: LINK_PADRAO }]]
         }
       });
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
 
-    // Grava no KV que o último enviado foi o Banner 1
     await env.KV_BOT_BANNERS.put("ultimo_banner", "1");
 
   } else {
-    const foto = "https://i.ibb.co/WWMjLync/file-10.jpg";
+    const foto = "https://i.ibb.co/VWp1mYp4/IMG-20260726-WA0000.jpg";
     const textoBanner2 =
       "🔥 <b>PROMOÇÃO IMPERDÍVEL</b> 🔥\n\n" +
       "📺 Tenha acesso a canais, filmes e séries por um preço que cabe no seu bolso!\n\n" +
@@ -105,36 +365,101 @@ async function executarEnvioBanners(env) {
       "Quanto mais indicar, mais meses grátis você ganha!\n\n" +
       "📲 Entre em contato agora e aproveite!";
 
-    for (const chatId of grupos) {
-      await enviarFotoTelegram(env.TELEGRAM_TOKEN, {
+    for (const chatId of LISTA_GRUPOS) {
+      await enviarTelegram(env.TELEGRAM_TOKEN, "sendPhoto", {
         chat_id: chatId,
         photo: foto,
         caption: textoBanner2,
         parse_mode: "HTML",
         reply_markup: {
-          inline_keyboard: [[{ text: "📲 Quero aproveitar", url: grupoUrl }]]
+          inline_keyboard: [[{ text: "📲 Quero aproveitar", url: LINK_PADRAO }]]
         }
       });
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
 
-    // Grava no KV que o último enviado foi o Banner 2
     await env.KV_BOT_BANNERS.put("ultimo_banner", "2");
   }
 }
 
-async function enviarMensagemTelegram(token, payload) {
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+// -------------------------------------------------------------
+// FUNÇÕES AUXILIARES E ESTRUTURAIS
+// -------------------------------------------------------------
+
+// Monta o layout de botões respeitando quebras de linha (\n) e colunas (|)
+function montarTecladoBotoes(textoInput) {
+  const linhas = textoInput.trim().split("\n");
+  const inlineKeyboard = [];
+
+  for (const linha of linhas) {
+    const botoesDaLinha = [];
+    const itens = linha.split("|");
+
+    for (const item of itens) {
+      const partes = item.split(" - ");
+      if (partes.length >= 2) {
+        const btnTexto = partes[0].trim();
+        let btnUrl = partes.slice(1).join(" - ").trim();
+
+        if (!btnUrl.startsWith("http://") && !btnUrl.startsWith("https://")) {
+          btnUrl = "https://" + btnUrl;
+        }
+
+        botoesDaLinha.push({ text: btnTexto, url: btnUrl });
+      }
+    }
+
+    if (botoesDaLinha.length > 0) {
+      inlineKeyboard.push(botoesDaLinha);
+    }
+  }
+
+  return inlineKeyboard;
+}
+
+// Direciona a requisição para a API do Telegram conforme o tipo de mídia
+async function enviarConteudo(token, chatId, data, replyMarkup) {
+  const payload = {
+    chat_id: chatId,
+    parse_mode: "HTML"
+  };
+
+  if (replyMarkup) payload.reply_markup = replyMarkup;
+
+  if (data.mediaType === "photo") {
+    payload.photo = data.fileId;
+    payload.caption = data.caption;
+    return await enviarTelegram(token, "sendPhoto", payload);
+  } else if (data.mediaType === "video") {
+    payload.video = data.fileId;
+    payload.caption = data.caption;
+    return await enviarTelegram(token, "sendVideo", payload);
+  } else if (data.mediaType === "animation") {
+    payload.animation = data.fileId;
+    payload.caption = data.caption;
+    return await enviarTelegram(token, "sendAnimation", payload);
+  } else {
+    payload.text = data.caption;
+    return await enviarTelegram(token, "sendMessage", payload);
+  }
+}
+
+// Auxiliar genérico para chamadas à API do Telegram
+async function enviarTelegram(token, metodo, payload) {
+  return await fetch(`https://api.telegram.org/bot${token}/${metodo}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
 }
 
-async function enviarFotoTelegram(token, payload) {
-  await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
+// Retorna a hora atual em Brasília (0 a 23)
+function obterHoraBrasilia() {
+  const horaStr = new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    hour: "numeric",
+    hour12: false
+  }).format(new Date());
+
+  return parseInt(horaStr, 10);
 }
