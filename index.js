@@ -351,7 +351,7 @@ async function executarEnvioBanners(env, forcar = false) {
     await env.KV_BOT_BANNERS.put("ultimo_banner", "1");
 
   } else {
-    const foto = "https://i.ibb.co/VWp1mYp4/IMG-20260726-WA0000.jpg";
+    const foto = "https://i.ibb.co/JRkzyM04/IMG-20260801-WA0020.jpg";
     const textoBanner2 =
       "🔥 <b>PROMOÇÃO IMPERDÍVEL</b> 🔥\n\n" +
       "📺 Tenha acesso a canais, filmes e séries por um preço que cabe no seu bolso!\n\n" +
